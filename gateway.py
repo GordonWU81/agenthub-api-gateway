@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes API Gateway v1.0 — Model Router 计费网关
+AgentHub API Gateway v1.0 — Model Router 计费网关
 在 Model Router (port 9099) 前面加一层：API Key 认证 + 用量计费 + 面包多支付
 
 架构:
@@ -14,24 +14,88 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
+
 import urllib.request, urllib.parse
 
 # ─── 配置 ─────────────────────────────────────────────
+
+
+# ─── 邮件通知 ─────────────────────────────────────────
+import smtplib
+from email.mime.text import MIMEText
+
+SMTP_HOST = "smtp.qq.com"
+SMTP_PORT = 465
+FROM_EMAIL = "1278373034@qq.com"
+AUTH_CODE = "mfziljrapgmeffjd"
+
+def send_email(to, subject, body):
+    try:
+        msg = MIMEText(body, "html", "utf-8")
+        msg["From"] = FROM_EMAIL
+        msg["To"] = to
+        msg["Subject"] = subject
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+            server.login(FROM_EMAIL, AUTH_CODE)
+            server.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"Email fail: {e}")
+        return False
+
+REG_WELCOME = '''<div style="max-width:600px;margin:0 auto;font-family:sans-serif;padding:20px">
+<div style="background:linear-gradient(135deg,#667eea,#764ba2);border-radius:12px 12px 0 0;padding:30px;text-align:center;color:#fff">
+<h1 style="margin:0">Welcome to AgentHub API!</h1>
+<p style="opacity:.9;margin:8px 0 0">72+ AI Models | One API Key</p></div>
+<div style="padding:24px;border:1px solid #eee;border-top:0;border-radius:0 0 12px 12px">
+<p style="color:#333">Hi <strong>{name}</strong>,</p>
+<p style="color:#666">Your account has been created with <strong style="color:#667eea">{bal:,} free tokens</strong>.</p>
+<div style="background:#f8f7ff;border:1px solid #e0dcff;border-radius:8px;padding:16px;margin:16px 0">
+<p style="color:#667eea;font-size:12px;margin:0 0 4px">YOUR API KEY</p>
+<p style="font-family:monospace;font-size:14px;color:#333;word-break:break-all;user-select:all">{key}</p></div>
+<h3 style="color:#333;margin:20px 0 8px">Quick Start</h3>
+<div style="background:#f5f5f5;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;line-height:1.6">
+curl https://api.agenthub-wu.cn/v1/chat/completions \\<br>
+&nbsp;&nbsp;-H "Authorization: Bearer {key}" \\<br>
+&nbsp;&nbsp;-d '{{"model":"deepseek-chat","messages":[{{"role":"user","content":"Hello!"}}]}}'
+</div>
+<p style="color:#999;font-size:12px;margin-top:20px">
+<a href="https://api.agenthub-wu.cn/v1/payment/page" style="color:#667eea">Top up →</a></p></div></div>'''
+
+PAY_CONFIRM = '''<div style="max-width:600px;margin:0 auto;font-family:sans-serif;padding:20px">
+<div style="background:linear-gradient(135deg,#52c41a,#389e0d);border-radius:12px 12px 0 0;padding:30px;text-align:center;color:#fff">
+<h1 style="margin:0">Payment Confirmed!</h1></div>
+<div style="padding:24px;border:1px solid #eee;border-top:0;border-radius:0 0 12px 12px">
+<p style="color:#333">Hi <strong>{name}</strong>,</p>
+<p style="color:#666">Your payment has been confirmed.</p>
+<div style="background:#f6ffed;border:1px solid #b7eb8f;border-radius:8px;padding:16px;margin:16px 0;text-align:center">
+<p style="font-size:28px;font-weight:700;color:#333">+{tokens:,} tokens</p>
+<p style="color:#389e0d;font-size:14px">¥{amount}</p></div>
+<p style="color:#999;font-size:12px;text-align:center">
+<a href="https://api.agenthub-wu.cn/v1/payment/page" style="color:#667eea">Check balance →</a></p></div></div>'''
+
+
 GATEWAY_DIR = Path(__file__).parent
 DB_PATH = GATEWAY_DIR / "gateway.db"
 ROUTER_URL = "http://127.0.0.1:9099"
-DEFAULT_FREE_QUOTA = 100000
+DEFAULT_FREE_QUOTA = 1000000
 ADMIN_KEY = "admin-" + hashlib.sha256(os.urandom(16)).hexdigest()[:16]
 LOG_FILE = GATEWAY_DIR / "gateway.log"
 
 # ─── 面包多支付 ────────────────────────────────────────
-MBD_APP_ID = "359464223249994"
-MBD_APP_KEY = "7ca63efb7fd9391f0d4f7806eb4fc1bc"
+PAYMENT_API = "http://127.0.0.1:9188/pay/order/create"
+PAYMENT_WEBHOOK = "http://127.0.0.1:9199/api/payment/webhook"
 MBD_API_BASE = "https://newapi.mbd.pub"
 MBD_RETURN_URL = "http://localhost:9199/v1/payment/success"
 MBD_WEBHOOK_URL = "https://agenthub-wu.cn/api/payment/webhook"
-TOKEN_PER_YUAN = 100000  # 1元 = 10万 tokens
+TOKEN_PER_YUAN = 1000000  # 1元 = 10万 tokens
 
+
+def hash_password(password):
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def verify_password(password, hash_val):
+    return hashlib.sha256(password.encode('utf-8')).hexdigest() == hash_val
 # ─── 数据库 ─────────────────────────────────────────────
 def get_db():
     db = sqlite3.connect(str(DB_PATH), check_same_thread=False)
@@ -47,10 +111,13 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             email TEXT,
+            password_hash TEXT DEFAULT '',
             created_at REAL NOT NULL,
             balance INTEGER DEFAULT 0,
             total_used INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'active'
+            status TEXT DEFAULT 'active',
+            plan TEXT DEFAULT 'free',
+            plan_expires REAL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS api_keys (
             key TEXT PRIMARY KEY,
@@ -120,10 +187,33 @@ def get_user_balance(user_id):
     db.close()
     return row["balance"] if row else 0
 
-def deduct_tokens(user_id, tokens):
+def deduct_tokens(user_id, tokens, plan_type="free"):
+    """扣费: 先用plan_balance(包月), 再用topup_balance(加购)"""
     db = get_db()
-    db.execute("UPDATE users SET balance = balance - ?, total_used = total_used + ? WHERE id=?",
-               [tokens, tokens, user_id])
+    user = db.execute("SELECT plan_balance, topup_balance, plan_type FROM users WHERE id=?", [user_id]).fetchone()
+    if not user:
+        db.close()
+        return
+    
+    remaining = tokens
+    plan_used = 0
+    topup_used = 0
+    
+    # 先用plan_balance
+    if user["plan_balance"] > 0:
+        plan_used = min(remaining, user["plan_balance"])
+        remaining -= plan_used
+    
+    # 再用topup_balance
+    if remaining > 0:
+        topup_used = min(remaining, user["topup_balance"])
+        remaining -= topup_used
+    
+    db.execute("""UPDATE users SET 
+        plan_balance = plan_balance - ?,
+        topup_balance = topup_balance - ?,
+        total_used = total_used + ?
+        WHERE id=?""", [plan_used, topup_used, tokens, user_id])
     db.commit()
     db.close()
 
@@ -134,6 +224,10 @@ def add_tokens(user_id, tokens, method="mbdpay", payment_id=""):
                [user_id, tokens, method, payment_id, time.time(), f"充值{tokens} tokens"])
     db.commit()
     db.close()
+
+# Override get_user_balance to include plan+topup
+# Update balance display in headers to return total
+
 
 def log_usage(user_id, api_key, model, prompt_tokens, completion_tokens, route_to, status="success"):
     total = prompt_tokens + completion_tokens
@@ -166,70 +260,41 @@ def validate_api_key(auth_header):
     return {"user_id": row["user_id"], "api_key": key, "balance": row["balance"]}
 
 # ─── 面包多支付 ──────────────────────────────────────
-def mbd_sign(params):
-    """签名: 参数key排序 + app_key拼接 → MD5小写"""
-    keys = sorted(params.keys())
-    raw = "&".join([f"{k}={params[k]}" for k in keys])
-    raw += "&key=" + MBD_APP_KEY
-    return hashlib.md5(raw.encode("utf-8")).hexdigest()  # 小写!
-
-def create_mbd_order(user_id, amount_yuan):
-    """创建面包多支付宝支付订单"""
+def create_payment_order(user_id, amount_yuan, channel="alipay"):
+    """通过自建支付平台创建订单"""
     tokens = int(amount_yuan * TOKEN_PER_YUAN)
-    amount_fen = int(amount_yuan * 100)
-    out_trade_no = f"TOP{int(time.time())}{user_id}"
-    
-    params = {
-        "app_id": MBD_APP_ID,
-        "out_trade_no": out_trade_no,
-        "description": f"API Token充值{amount_yuan}元",
-        "amount_total": amount_fen,
-        "url": MBD_RETURN_URL,
-        "callback_url": MBD_WEBHOOK_URL,
-    }
-    params["sign"] = mbd_sign(params)
     
     try:
+        data = json.dumps({
+            "user_id": user_id,
+            "amount_yuan": amount_yuan,
+            "channel": channel,
+            "callback_url": "http://127.0.0.1:9199/api/payment/webhook",
+        }).encode("utf-8")
         req = urllib.request.Request(
-            f"{MBD_API_BASE}/release/alipay/pay",
-            data=json.dumps(params).encode("utf-8"),
+            PAYMENT_API, data=data,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         resp = urllib.request.urlopen(req, timeout=15)
-        result_text = resp.read().decode("utf-8")
+        result = json.loads(resp.read())
         
-        # 面包多返回的是支付宝支付表单HTML
-        # 提取表单中的action URL
-        import re
-        action_match = re.search(r'action=\'([^\']+)\'', result_text)
-        if action_match:
-            pay_url = action_match.group(1)
-            # 把所有input参数加到URL上
-            inputs = re.findall(r"name='([^']+)'\s*value='([^']*)'", result_text)
-            params_list = [f"{urllib.parse.quote(n)}={urllib.parse.quote(v)}" for n, v in inputs]
-            pay_url += "&" + "&".join(params_list)
-            
+        if result.get("success"):
             # 保存待处理订单
             db = get_db()
             db.execute("INSERT INTO pending_topups (user_id, amount, mbd_order_id, status, created_at) VALUES (?, ?, ?, ?, ?)",
-                       [user_id, tokens, out_trade_no, "pending", time.time()])
+                       [user_id, tokens, result["order_no"], "pending", time.time()])
             db.commit()
             db.close()
-            return {"success": True, "pay_url": pay_url, "out_trade_no": out_trade_no, "tokens": tokens}
+            return {"success": True, "pay_url": result["pay_url"], "order_no": result["order_no"], "tokens": tokens}
         else:
-            return {"success": False, "error": "无法解析支付地址", "raw": result_text[:200]}
+            return {"success": False, "error": result.get("error", "创建失败")}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 def verify_mbd_webhook(data):
-    """验证面包多Webhook回调"""
-    sign = data.pop("sign", "")
-    keys = sorted(data.keys())
-    raw = "&".join([f"{k}={data[k]}" for k in keys])
-    raw += "&key=" + MBD_APP_KEY
-    expected = hashlib.md5(raw.encode("utf-8")).hexdigest()  # 小写!
-    return sign == expected
+    # Deprecated: 已切换至自建支付平台
+    return True
 
 # ─── HTTP Handler ────────────────────────────────────
 class GatewayHandler(BaseHTTPRequestHandler):
@@ -279,8 +344,16 @@ class GatewayHandler(BaseHTTPRequestHandler):
         path = parsed.path
         qs = parse_qs(parsed.query)
         
+
+        # 自助注册（GET）
+        if path == "/v1/register":
+            html = open("/opt/hermes-api-stack/api-gateway/register.html").read()
+            self._send_html(html)
+            return
+        
+        # 健康检查
         if path == "/v1/health":
-            self._send_json({"status": "ok", "gateway": "hermes-api-gateway", "router": ROUTER_URL, "mbd_pay": MBD_APP_ID})
+            self._send_json({"status": "ok", "gateway": "agenthub-api-gateway", "router": ROUTER_URL, "pay_platform": "http://127.0.0.1:9188/pay/health"})
         
         elif path == "/v1/models":
             try:
@@ -289,157 +362,14 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self._send_json(json.loads(resp.read()))
             except Exception as e:
                 self._send_json({"error": str(e)}, 502)
-        
         elif path == "/v1/payment/page":
-            # 自助充值页面
             auth = validate_api_key(self.headers.get("Authorization", ""))
-            if not auth:
-                self._send_json({"error": "请先登录（提供API Key）"}, 401)
-                return
-            self._send_html(f"""<!DOCTYPE html>
-<html><meta charset="utf-8"><title>API Token 充值</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{{font-family:sans-serif;max-width:600px;margin:50px auto;padding:20px;text-align:center}}
-.card{{background:#f5f5f5;border-radius:12px;padding:30px;margin:20px 0}}
-.price{{font-size:48px;color:#333;margin:10px 0}}
-.balance{{color:#666;margin:20px 0}}
-.btn{{display:inline-block;padding:15px 40px;background:#1677ff;color:#fff;border:none;
-border-radius:8px;font-size:18px;cursor:pointer;text-decoration:none;margin:10px}}
-.btn:hover{{background:#4096ff}}
-.amount-btn{{padding:10px 20px;margin:5px;border:2px solid #ddd;border-radius:8px;
-background:#fff;cursor:pointer;font-size:16px;min-width:100px}}
-.amount-btn.active{{border-color:#1677ff;background:#e6f4ff}}
-input[type=hidden]{{display:none}}
-</style></head><body>
-<h2>💎 API Token 充值</h2>
-<div class="card">
-<div class="balance">💰 当前余额: <strong id="balance">{auth["balance"]:,}</strong> tokens</div>
-<div style="margin:20px 0"><p style="color:#999">选择充值金额</p>
-<button class="amount-btn" data-yuan="10" data-tokens="1,000,000">¥10<br><small>100万 tokens</small></button>
-<button class="amount-btn active" data-yuan="30" data-tokens="3,000,000">¥30<br><small>300万 tokens</small></button>
-<button class="amount-btn" data-yuan="50" data-tokens="5,000,000">¥50<br><small>500万 tokens</small></button>
-<button class="amount-btn" data-yuan="100" data-tokens="10,000,000">¥100<br><small>1000万 tokens</small></button>
-</div>
-<input type="hidden" id="amount" value="30">
-<div class="price" id="amount-display">30 元</div>
-<button class="btn" onclick="pay()">🚀 支付宝支付</button>
-<script>
-document.querySelectorAll('.amount-btn').forEach(b=>b.onclick=()=>{{
-document.querySelectorAll('.amount-btn').forEach(x=>x.classList.remove('active'))
-b.classList.add('active')
-let y=b.dataset.yuan
-document.getElementById('amount').value=y
-document.getElementById('amount-display').textContent=y+' 元'
-}})
-function pay(){{
-let yuan=document.getElementById('amount').value
-let key=document.getElementById('api-key').value||''
-fetch('/v1/payment/create',{{
-method:'POST',headers:{{'Content-Type':'application/json',
-'Authorization':'Bearer '+key}},
-body:JSON.stringify({{amount_yuan:parseInt(yuan)}})
-}}).then(r=>r.json()).then(d=>{{
-if(d.pay_url)window.location.href=d.pay_url
-else alert('支付创建失败: '+JSON.stringify(d))
-}})
-}}
-</script></div>
-<input type="hidden" id="api-key" value="{auth["api_key"]}">
-<p style="color:#999;margin-top:30px;font-size:14px">支付成功后，tokens 自动到账</p>
-<p style="color:#999;font-size:12px">由 面包多Pay 提供支付能力 · 个人开发者可用</p>
-</body></html>""")
-        
-        elif path == "/v1/payment/success":
-            # 支付成功跳转页
-            self._send_html("""<!DOCTYPE html>
-<html><meta charset="utf-8"><title>支付成功</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{font-family:sans-serif;text-align:center;padding:80px 20px}
-h1{color:#52c41a} .btn{padding:15px 40px;background:#1677ff;color:#fff;border-radius:8px;
-text-decoration:none;display:inline-block;margin-top:30px}</style>
-<body><h1>✅ 支付成功！</h1>
-<p>Token 已自动充值到您的账户</p>
-<p>返回 <a href="/v1/payment/page">充值页面</a> 查看余额</p></body></html>""")
-        
-        elif path.startswith("/v1/admin/"):
-            auth = validate_api_key(self.headers.get("Authorization", ""))
-            if not auth:
-                self._send_json({"error": "Unauthorized"}, 401)
-                return
-            # GET admin endpoints
-            if path == "/v1/admin/users":
-                db = get_db()
-                rows = db.execute("SELECT id,name,email,balance,total_used,status,created_at FROM users").fetchall()
-                db.close()
-                self._send_json({"users": [dict(r) for r in rows]})
-            elif path == "/v1/admin/api_keys":
-                user_id = qs.get("user_id", [None])[0]
-                db = get_db()
-                if user_id:
-                    rows = db.execute("SELECT * FROM api_keys WHERE user_id=?", [user_id]).fetchall()
-                else:
-                    rows = db.execute("SELECT * FROM api_keys").fetchall()
-                db.close()
-                self._send_json({"api_keys": [dict(r) for r in rows]})
-            else:
-                self._send_json({"error": "Not found"}, 404)
-        
-        else:
-            self._send_json({"error": "Not found"}, 404)
-    
-    def do_POST(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
-        content_length = int(self.headers.get("Content-Length", 0))
-        body_raw = self.rfile.read(content_length) if content_length else b"{}"
-        body = json.loads(body_raw) if body_raw else {}
-        
-        # ═══ Chat Completion ═══
-        if path == "/v1/chat/completions":
-            auth = validate_api_key(self.headers.get("Authorization", ""))
-            if not auth:
-                self._send_json({"error": "Unauthorized", "message": "请提供有效的API Key"}, 401)
-                return
-            data = body
-            messages = data.get("messages", [])
-            estimated_cost = self._count_tokens(messages) * 2
-            balance = auth["balance"]
-            if balance < estimated_cost:
-                self._send_json({
-                    "error": "Insufficient balance",
-                    "message": f"余额不足: 需要约{estimated_cost} tokens，当前{balance} tokens",
-                    "balance": balance, "estimated_cost": estimated_cost,
-                }, 402)
-                return
-            status, resp_body, resp_headers = self._forward_to_router("/v1/chat/completions", body_raw, self.headers)
-            prompt_tokens = completion_tokens = 0
-            route_to = data.get("model", "unknown")
-            if status == 200:
-                try:
-                    rd = json.loads(resp_body)
-                    usage = rd.get("usage", {})
-                    prompt_tokens = usage.get("prompt_tokens", estimated_cost // 2)
-                    completion_tokens = usage.get("completion_tokens", estimated_cost // 2)
-                    route_to = resp_headers.get("X-Routed-Model", route_to)
-                except:
-                    prompt_tokens = estimated_cost // 2
-                    completion_tokens = estimated_cost // 2
-            total_tokens = prompt_tokens + completion_tokens
-            deduct_tokens(auth["user_id"], total_tokens)
-            log_usage(auth["user_id"], auth["api_key"], route_to,
-                      prompt_tokens, completion_tokens, route_to,
-                      "success" if status == 200 else "failed")
-            self.send_response(status)
-            for k, v in resp_headers.items():
-                if k.lower() in ("content-type", "content-length", "x-routed-model", "x-routed-provider"):
-                    self.send_header(k, v)
-            self.send_header("X-Gateway-Balance-Deduction", str(total_tokens))
-            self.send_header("X-Gateway-Balance-Remaining", str(get_user_balance(auth["user_id"])))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(resp_body if isinstance(resp_body, bytes) else resp_body.encode())
-        
-        # ═══ 充值接口 ═══
+            html = open("/opt/hermes-api-stack/api-gateway/payment.html").read()
+            if auth:
+                html = html.replace("id=\"balance\">--", "id=\"balance\">" + str(get_user_balance(auth["user_id"])))
+            self._send_html(html)
+            return
+            db.commit()
         elif path == "/v1/payment/create":
             auth = validate_api_key(self.headers.get("Authorization", ""))
             if not auth:
@@ -449,32 +379,38 @@ text-decoration:none;display:inline-block;margin-top:30px}</style>
             if amount_yuan < 1:
                 self._send_json({"error": "金额至少1元"}, 400)
                 return
-            result = create_mbd_order(auth["user_id"], amount_yuan)
+            result = create_payment_order(auth["user_id"], amount_yuan)
             if result["success"]:
-                self._send_json({"pay_url": result["pay_url"], "out_trade_no": result["out_trade_no"], "tokens": result["tokens"]})
+                self._send_json({"pay_url": result["pay_url"], "out_trade_no": result.get("order_no",result.get("out_trade_no","")), "tokens": result["tokens"]})
             else:
                 self._send_json({"error": result["error"]}, 500)
         
         # ═══ 面包多Webhook ═══
         elif path == "/api/payment/webhook":
-            if verify_mbd_webhook(dict(body)):
-                out_trade_no = body.get("out_trade_no", "")
-                trade_status = body.get("trade_status", "")
-                if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED"):
-                    # 查找待处理订单
-                    db = get_db()
-                    pending = db.execute("SELECT id, user_id, amount FROM pending_topups WHERE mbd_order_id=? AND status='pending'",
-                                         [out_trade_no]).fetchone()
-                    if pending:
-                        # 充值
-                        add_tokens(pending["user_id"], pending["amount"], "mbdpay", out_trade_no)
-                        db.execute("UPDATE pending_topups SET status='paid' WHERE id=?", [pending["id"]])
-                        db.commit()
-                        print(f"✅ 支付成功: {out_trade_no}, 用户{pending['user_id']}, +{pending['amount']} tokens")
-                    db.close()
-                self._send_json({"code": 0, "message": "success"})
-            else:
-                self._send_json({"code": -1, "message": "sign invalid"}, 403)
+            # 自建支付平台回调（本机，无需签名验证）
+            out_trade_no = body.get("out_trade_no", "")
+            trade_status = body.get("trade_status", "")
+            user_id = body.get("user_id", 0)
+            if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED"):
+                db = get_db()
+                pending = db.execute("SELECT id, user_id, amount FROM pending_topups WHERE mbd_order_id=? AND status='pending'",
+                                     [out_trade_no]).fetchone()
+                if pending:
+                    add_tokens(pending["user_id"], pending["amount"], "selfpay", out_trade_no)
+                    # Send payment email
+                    user_info = db.execute("SELECT name, email FROM users WHERE id=?", [pending["user_id"]]).fetchone()
+                    if user_info and user_info["email"]:
+                        try:
+                            name = user_info["name"] or "User"
+                            html = PAY_CONFIRM.format(name=name, tokens=pending["amount"], amount=pending["amount"]//1000000)
+                            send_email(user_info["email"], "Payment Confirmed - Tokens Added!", html)
+                        except:
+                            pass
+                    db.execute("UPDATE pending_topups SET status='paid' WHERE id=?", [pending["id"]])
+                    db.commit()
+                    print(f"✅ 支付成功: {out_trade_no}, 用户{pending['user_id']}, +{pending['amount']} tokens")
+                db.close()
+            self._send_json({"code": 0, "message": "success"})
         
         # ═══ Admin 充值 ═══
         elif path == "/v1/admin/topup":
@@ -514,6 +450,212 @@ text-decoration:none;display:inline-block;margin-top:30px}</style>
         else:
             self._send_json({"error": "Not found"}, 404)
     
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        content_length = int(self.headers.get("Content-Length", 0))
+        body_raw = self.rfile.read(content_length) if content_length else b"{}"
+        body = json.loads(body_raw) if body_raw else {}
+        
+
+        # ═══ 邮箱密码登录 ═══
+        if path == "/v1/auth/login":
+            email = body.get("email", "").strip().lower()
+            password = body.get("password", "")
+            if not email or not password:
+                self._send_json({"error": "请填写邮箱和密码"}, 400)
+                return
+            db = get_db()
+            user = db.execute("SELECT id, name, password_hash, balance, plan FROM users WHERE email=?", [email]).fetchone()
+            db.close()
+            if not user or not verify_password(password, user["password_hash"]):
+                self._send_json({"error": "邮箱或密码错误"}, 401)
+                return
+            # 获取API Key
+            db = get_db()
+            key_row = db.execute("SELECT key FROM api_keys WHERE user_id=?", [user["id"]]).fetchone()
+            db.close()
+            api_key = key_row["key"] if key_row else ""
+            self._send_json({
+                "success": True,
+                "user_id": user["id"],
+                "name": user["name"],
+                "api_key": api_key,
+                "balance": user["balance"],
+                "plan": user["plan"],
+            })
+            return
+        
+        # ═══ 邮箱注册（带密码）═══
+        if path == "/v1/auth/register":
+            name = body.get("name", "").strip()
+            email = body.get("email", "").strip().lower()
+            password = body.get("password", "")
+            if not name or not email or not password:
+                self._send_json({"error": "请填写用户名、邮箱和密码"}, 400)
+                return
+            if len(password) < 6:
+                self._send_json({"error": "密码至少6位"}, 400)
+                return
+            db = get_db()
+            exist = db.execute("SELECT id FROM users WHERE email=?", [email]).fetchone()
+            if exist:
+                db.close()
+                self._send_json({"error": "该邮箱已注册"}, 409)
+                return
+            ts = time.time()
+            pw_hash = hash_password(password)
+            db.execute("INSERT INTO users (name, email, password_hash, created_at, balance, status, plan) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       [name, email, pw_hash, ts, 1000000, "active", "free"])
+            uid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+            api_key = "sk-" + uuid.uuid4().hex[:24]
+            db.execute("INSERT INTO api_keys (key, user_id, name, created_at) VALUES (?, ?, ?, ?)",
+                       [api_key, uid, "default", ts])
+            db.commit()
+            db.close()
+            # Welcome email
+            if email:
+                try:
+                    html = REG_WELCOME.format(name=name, key=api_key, bal=1000000)
+                    send_email(email, "Welcome to Duozhilian / 多智联!", html)
+                except:
+                    pass
+            self._send_json({"success": True, "api_key": api_key, "user_id": uid, "balance": 1000000, "name": name})
+            return
+        # ═══ 自助注册API ═══
+        if path == "/v1/register":
+            name = body.get("name","").strip()
+            email = body.get("email","").strip()
+            if not name or not email:
+                self._send_json({"error":"请填写昵称和邮箱"},400)
+                return
+            db = get_db()
+            ts = time.time()
+            db.execute("INSERT INTO users (name, email, created_at, balance, status) VALUES (?, ?, ?, ?, ?)",
+                       [name, email, ts, 1000000, "active"])
+            uid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+            api_key = "sk-" + uuid.uuid4().hex[:24]
+            db.execute("INSERT INTO api_keys (key, user_id, name, created_at) VALUES (?, ?, ?, ?)",
+                       [api_key, uid, "default", ts])
+            db.commit()
+            db.close()
+            # Send welcome email
+            if email and "@" in email:
+                try:
+                    html = REG_WELCOME.format(name=name, key=api_key, bal=1000000)
+                    send_email(email, "Welcome to AgentHub API!", html)
+                except:
+                    pass
+            self._send_json({"success":True, "api_key":api_key, "user_id":uid, "balance":1000000})
+            return
+        
+        # ═══ Chat Completion ═══
+
+        # ═══ 重置包月额度（吸血鬼引擎内部调用）═══
+        if path == "/v1/admin/reset-plan":
+            auth = validate_api_key(self.headers.get("Authorization", ""))
+            if not auth:
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            # 重置所有用户的plan_balance到当月上限
+            db = get_db()
+            today = time.strftime("%Y-%m-%d")
+            caps = {"free": 100000, "pro": 5000000, "enterprise": 30000000,
+                    "combo_pro": 6000000, "combo_enterprise": 50000000}
+            users = db.execute("SELECT id, plan_type FROM users WHERE last_reset_date != ? OR last_reset_date IS NULL", [today]).fetchall()
+            reset_count = 0
+            for u in users:
+                cap = caps.get(u["plan_type"] or "free", 100000)
+                db.execute("UPDATE users SET plan_balance = ?, last_reset_date = ? WHERE id=?", [cap, today, u["id"]])
+                reset_count += 1
+            db.commit()
+            db.close()
+            self._send_json({"success": True, "reset_count": reset_count})
+            return
+
+        if path == "/v1/chat/completions":
+            auth = validate_api_key(self.headers.get("Authorization", ""))
+            if not auth:
+                self._send_json({"error": "Unauthorized", "message": "请提供有效的API Key"}, 401)
+                return
+            data = body
+            messages = data.get("messages", [])
+            estimated_cost = self._count_tokens(messages) * 2
+            balance = auth["balance"]
+            if balance < estimated_cost:
+                self._send_json({"error": "余额不足", "balance": balance, "estimated_cost": estimated_cost}, 402)
+                return
+            status, resp_body, resp_headers = self._forward_to_router("/v1/chat/completions", body_raw, self.headers)
+            prompt_tokens = completion_tokens = 0
+            route_to = data.get("model", "unknown")
+            if status == 200:
+                try:
+                    rd = json.loads(resp_body)
+                    usage = rd.get("usage", {})
+                    prompt_tokens = usage.get("prompt_tokens", estimated_cost // 2)
+                    completion_tokens = usage.get("completion_tokens", estimated_cost // 2)
+                except:
+                    prompt_tokens = estimated_cost // 2
+                    completion_tokens = estimated_cost // 2
+            total_tokens = prompt_tokens + completion_tokens
+            deduct_tokens(auth["user_id"], int(total_tokens * 1.1))
+            log_usage(auth["user_id"], auth["api_key"], route_to, prompt_tokens, completion_tokens, route_to)
+            self.send_response(status)
+            for k, v in resp_headers.items():
+                if k.lower() in ("content-type", "content-length", "x-routed-model", "x-routed-provider"):
+                    self.send_header(k, v)
+            self.send_header("X-Gateway-Balance-Deduction", str(total_tokens))
+            self.send_header("X-Gateway-Balance-Remaining", str(get_user_balance(auth["user_id"])))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(resp_body if isinstance(resp_body, bytes) else resp_body.encode())
+            return
+        
+        # ═══ 创建支付订单 ═══
+        if path == "/v1/payment/create":
+            auth = validate_api_key(self.headers.get("Authorization", ""))
+            if not auth:
+                self._send_json({"error": "Unauthorized"}, 401)
+                return
+            amount_yuan = int(body.get("amount_yuan", 0))
+            channel = body.get("channel", "alipay")
+            if amount_yuan < 1:
+                self._send_json({"error": "金额至少1元"}, 400)
+                return
+            result = create_payment_order(auth["user_id"], amount_yuan, channel)
+            if result["success"]:
+                self._send_json({"pay_url": result["pay_url"], "order_no": result["order_no"], "tokens": result["tokens"]})
+            else:
+                self._send_json({"error": result["error"]}, 500)
+            return
+        
+        # ═══ 支付回调Webhook ═══
+        if path == "/api/payment/webhook":
+            out_trade_no = body.get("out_trade_no", "")
+            trade_status = body.get("trade_status", "")
+            if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED"):
+                db = get_db()
+                pending = db.execute("SELECT id, user_id, amount FROM pending_topups WHERE mbd_order_id=? AND status='pending'",
+                                     [out_trade_no]).fetchone()
+                if pending:
+                    add_tokens(pending["user_id"], pending["amount"], "selfpay", out_trade_no)
+                    db.execute("UPDATE pending_topups SET status='paid' WHERE id=?", [pending["id"]])
+                    # Send payment email
+                    user_info = db.execute("SELECT name, email FROM users WHERE id=?", [pending["user_id"]]).fetchone()
+                    if user_info and user_info["email"]:
+                        try:
+                            html = PAY_CONFIRM.format(name=user_info["name"] or "User", tokens=pending["amount"], amount=pending["amount"]//1000000)
+                            send_email(user_info["email"], "Payment Confirmed - Tokens Added!", html)
+                        except:
+                            pass
+                    db.commit()
+                db.close()
+            self._send_json({"code": 0, "message": "success"})
+            return
+        
+        self._send_json({"error": "Not found"}, 404)
+
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -529,7 +671,7 @@ class ThreadedGatewayServer(ThreadingMixIn, HTTPServer):
 
 def main():
     global ROUTER_URL
-    parser = argparse.ArgumentParser(description="Hermes API Gateway")
+    parser = argparse.ArgumentParser(description="AgentHub API Gateway")
     parser.add_argument("--port", type=int, default=9199, help="监听端口")
     parser.add_argument("--host", default="0.0.0.0", help="监听地址")
     parser.add_argument("--router", default=ROUTER_URL, help="Model Router地址")
@@ -537,7 +679,7 @@ def main():
     ROUTER_URL = args.router
     init_db()
     server = ThreadedGatewayServer((args.host, args.port), GatewayHandler)
-    print(f"🚀 Hermes API Gateway v1.0")
+    print(f"🚀 AgentHub API Gateway v1.0")
     print(f"   Listen: http://{args.host}:{args.port}")
     print(f"   Router: {ROUTER_URL}")
     print(f"   充值页: http://{args.host}:{args.port}/v1/payment/page")

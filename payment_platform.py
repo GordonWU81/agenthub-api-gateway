@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-Hermes Pay Unified — 统一国际支付网关
+AgentHub Pay Unified — 统一国际支付网关
 融合方案A(手动确认) + 方案B(多通道自动API)
-
 架构:
   API Gateway → 统一支付平台 (:9188) → 多种支付渠道 → 回调充值
-
 渠道:
   - alipay:    支付宝个人收款码 (手动确认)
   - wechat:    微信个人收款码 (手动确认)
@@ -20,17 +18,28 @@ from socketserver import ThreadingMixIn
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs, quote
 import urllib.request
-
 # ─── 配置 ─────────────────────────────────────────────
 PAY_DIR = Path(__file__).parent
 DB_PATH = PAY_DIR / "payments.db"
 QR_DIR = PAY_DIR / "qrcodes"
-SITE_NAME = "Hermes Pay"
-SITE_URL = "http://47.97.68.146"
+SITE_NAME = "AgentHub Pay"
+SITE_URL = "https://pay.agenthub-wu.cn"
 WEBHOOK_URL = "http://127.0.0.1:9199/api/payment/webhook"
-TOKEN_PER_YUAN = 100000
-
+TOKEN_PER_YUAN = 1000000
 # 渠道配置（可动态切换）
+# --- 套餐体系 ---
+PACKAGES = [
+    {"id": "trial",     "name": "尝鲜",    "price": 10,  "tokens": 10000000,  "bonus": 0,        "unit": "1.00/百万", "badge": ""},
+    {"id": "popular",   "name": "热门",  "price": 30,  "tokens": 30000000,  "bonus": 5000000,  "unit": "0.86/百万", "badge": "最受欢迎"},
+    {"id": "pro",       "name": "专业",    "price": 100, "tokens": 100000000, "bonus": 20000000, "unit": "0.83/百万", "badge": "最划算"},
+    {"id": "enterprise","name": "企业",    "price": 500, "tokens": 500000000, "bonus": 150000000,"unit": "0.77/百万", "badge": "超值"},
+]
+def calc_tokens(amount_yuan):
+    for pkg in reversed(PACKAGES):
+        if amount_yuan >= pkg["price"] and amount_yuan % pkg["price"] == 0:
+            mult = amount_yuan // pkg["price"]
+            return pkg["tokens"] * mult + pkg["bonus"] * mult
+    return int(amount_yuan * 1000000)
 CHANNELS = {
     "alipay": {"name": "支付宝", "icon": "💳", "enabled": True, "manual": True,
                "qr": str(QR_DIR / "alipay_qr.png"), "account": "1278373034@qq.com"},
@@ -41,19 +50,16 @@ CHANNELS = {
     "paypal": {"name": "PayPal", "icon": "🅿️", "enabled": False, "manual": False,
                "client_id": "", "secret": "", "email": "1278373034@qq.com"},
     "crypto": {"name": "USDT (TRC20)", "icon": "₿", "enabled": True, "manual": True,
-               "address": "TXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", "network": "TRC20"},
+               "address": "TKKKja9wbDtfNd8rwMLeoZ5aP5xe49DJrT", "network": "TRC20"},
 }
-
 # 管理密码
 ADMIN_PASSWORD = hashlib.sha256(os.urandom(16)).hexdigest()[:8]
-
 # ─── 数据库 ─────────────────────────────────────────────
 def get_db():
     db = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     return db
-
 def init_db():
     db = get_db()
     db.executescript("""
@@ -78,11 +84,10 @@ def init_db():
     """)
     QR_DIR.mkdir(parents=True, exist_ok=True)
     db.close()
-
 # ─── 业务逻辑 ─────────────────────────────────────────
 def create_order(user_id, amount_yuan, channel="alipay", callback_url=WEBHOOK_URL):
     order_no = f"PAY{int(time.time()*1000)}{uuid.uuid4().hex[:6].upper()}"
-    tokens = int(amount_yuan * TOKEN_PER_YUAN)
+    tokens = calc_tokens(amount_yuan)
     
     ch = CHANNELS.get(channel, CHANNELS["alipay"])
     if not ch["enabled"]:
@@ -90,9 +95,9 @@ def create_order(user_id, amount_yuan, channel="alipay", callback_url=WEBHOOK_UR
     
     db = get_db()
     db.execute("""INSERT INTO orders 
-        (order_no, user_id, amount_yuan, tokens, channel, callback_url, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        [order_no, user_id, amount_yuan, tokens, channel, callback_url, "pending", time.time()])
+        (order_no, user_id, amount_yuan, tokens, channel, description, callback_url, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [order_no, user_id, amount_yuan, tokens, channel, "", callback_url, "pending", time.time()])
     db.commit()
     db.close()
     
@@ -105,7 +110,6 @@ def create_order(user_id, amount_yuan, channel="alipay", callback_url=WEBHOOK_UR
         "pay_url": f"{SITE_URL}/pay/{channel}/{order_no}",
         "manual": ch["manual"],
     }
-
 def confirm_order(order_no):
     db = get_db()
     order = db.execute("SELECT * FROM orders WHERE order_no=? AND status='pending'", [order_no]).fetchone()
@@ -138,13 +142,11 @@ def confirm_order(order_no):
             pass
     
     return dict(order), None
-
 def get_order(order_no):
     db = get_db()
     o = db.execute("SELECT * FROM orders WHERE order_no=?", [order_no]).fetchone()
     db.close()
     return dict(o) if o else None
-
 def list_orders(channel=None, status=None, page=1, limit=50):
     db = get_db()
     where = []
@@ -163,7 +165,6 @@ def list_orders(channel=None, status=None, page=1, limit=50):
     rows = db.execute(sql, params).fetchall()
     db.close()
     return [dict(r) for r in rows]
-
 def get_stats():
     db = get_db()
     r = db.execute("SELECT channel, status, COUNT(*) as cnt FROM orders GROUP BY channel, status").fetchall()
@@ -176,7 +177,6 @@ def get_stats():
         stats[ch]["total"] += row["cnt"]
         stats[ch][row["status"]] = row["cnt"]
     return stats
-
 # ─── HTTP Handler ────────────────────────────────────
 class PayHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -243,17 +243,13 @@ body{{font-family:-apple-system,sans-serif;background:#f5f5f5;display:flex;justi
 <h2 style="color:#333;font-size:20px">{name} 支付</h2>
 <div class="price">¥{order["amount_yuan"]:.0f}</div>
 <div class="token">= {order["tokens"]:,} tokens</div>
-
 <div class="qr-box">
 {"<img src='/pay/qrcode/" + channel + "' alt='收款码'><p style='color:#999;font-size:13px;margin-top:12px'>请使用" + name + "扫码付款</p>" if qr_exists else "<p style='color:#999'>⏳ 收款码待上传<br><span style='font-size:12px'>请手动转账到下方账号</span></p>"}
 </div>
-
 <div class="account">
 📱 收款账号<br><strong>{ch["account"]}</strong>
 </div>
-
 <button class="btn primary" onclick="doPay()">✅ 我已付款</button>
-
 <div class="status pending" id="sPending">⏳ 等待确认中...</div>
 <div class="status success" id="sSuccess">✅ 支付成功！Token 已到账</div>
 </div>
@@ -356,6 +352,20 @@ function doPay(){{
         path = parsed.path
         qs = parse_qs(parsed.query)
         
+        # 收款码图片
+        if path.startswith("/pay/qrcode/"):
+            channel = path.split("/pay/qrcode/")[-1]
+            ch = CHANNELS.get(channel)
+            if ch and os.path.exists(ch["qr"]):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(os.path.getsize(ch["qr"])))
+                self.end_headers()
+                with open(ch["qr"], "rb") as f:
+                    self.wfile.write(f.read())
+            else:
+                self._send_html("No QR", 404)
+        
         # 支付页面
         if path.startswith("/pay/") and path.count("/") >= 3:
             parts = path.split("/")
@@ -421,20 +431,6 @@ body{{font-family:-apple-system,sans-serif;background:#f5f5f5;display:flex;justi
 {cards_html}
 <div class="order-no">订单: {order_no}</div>
 </div></body></html>""")
-        
-        # 收款码图片
-        elif path.startswith("/pay/qrcode/"):
-            channel = path.split("/pay/qrcode/")[-1]
-            ch = CHANNELS.get(channel)
-            if ch and os.path.exists(ch["qr"]):
-                self.send_response(200)
-                self.send_header("Content-Type", "image/png")
-                self.send_header("Content-Length", str(os.path.getsize(ch["qr"])))
-                self.end_headers()
-                with open(ch["qr"], "rb") as f:
-                    self.wfile.write(f.read())
-            else:
-                self._send_html("No QR", 404)
         
         # 管理后台
         elif path == "/pay/admin":
@@ -510,6 +506,17 @@ function confirmOrder(no){{if(confirm('确认到账？'))fetch('/pay/admin/confi
             self._send_json({"orders": orders, "total": len(orders)})
         
         # 健康检查
+        # 套餐列表
+        elif path == "/pay/packages":
+            pkgs = []
+            for p in PACKAGES:
+                pkgs.append({
+                    "id": p["id"], "name": p["name"], "price": p["price"],
+                    "tokens": p["tokens"], "bonus": p["bonus"],
+                    "total": p["tokens"] + p["bonus"],
+                    "unit": p["unit"], "badge": p["badge"],
+                })
+            self._send_json({"packages": pkgs})
         elif path == "/pay/health":
             pending = len(list_orders(status="pending"))
             stats = get_stats()
@@ -582,15 +589,11 @@ function confirmOrder(no){{if(confirm('确认到账？'))fetch('/pay/admin/confi
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
-
-
 class ThreadedPayServer(ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Hermes Pay Unified")
+    parser = argparse.ArgumentParser(description="AgentHub Pay Unified")
     parser.add_argument("--port", type=int, default=9188)
     parser.add_argument("--host", default="0.0.0.0")
     args = parser.parse_args()
@@ -629,7 +632,5 @@ def main():
     except KeyboardInterrupt:
         print("\nShutting down...")
         server.shutdown()
-
-
 if __name__ == "__main__":
     main()
