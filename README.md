@@ -1,11 +1,11 @@
 <div align="center">
 
-# Hermes API Gateway
+# AgentHub API Gateway
 
 **OpenAI-compatible API Gateway with built-in billing, Model Router, and self-hosted payment**
 
-[![GitHub stars](https://img.shields.io/github/stars/GordonWU81/hermes-api-gateway?style=flat-square)](https://github.com/GordonWU81/hermes-api-gateway/stargazers)
-[![License](https://img.shields.io/github/license/GordonWU81/hermes-api-gateway?style=flat-square)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/GordonWU81/agenthub-api-gateway?style=flat-square)](https://github.com/GordonWU81/agenthub-api-gateway/stargazers)
+[![License](https://img.shields.io/github/license/GordonWU81/agenthub-api-gateway?style=flat-square)](LICENSE)
 [![Status](https://img.shields.io/badge/status-production%20ready-green?style=flat-square)]()
 [![Models](https://img.shields.io/badge/models-72-blue?style=flat-square)]()
 
@@ -17,7 +17,7 @@
 
 ## 📋 Overview
 
-Hermes API Gateway is a production-ready API gateway for LLMs that combines:
+AgentHub API Gateway is a production-ready API gateway for LLMs that combines:
 - **Model Router** — 72+ models from 5 providers with automatic failover
 - **API Key Authentication** — user management, token-based billing
 - **Self-hosted Payment** — Alipay, WeChat Pay, and USDT/TRC20 crypto
@@ -125,7 +125,7 @@ User → Nginx (:80)
 ## 📦 Components
 
 ```
-hermes-api-gateway/
+agenthub-api-gateway/
 ├── gateway.py          # API Gateway (auth + billing + registration)
 ├── model_router.py     # Model Router (routing + failover + circuit breaker)
 ├── payment_platform.py # Self-hosted payment (Alipay/WeChat/USDT)
