@@ -552,7 +552,7 @@ class GatewayHandler(BaseHTTPRequestHandler):
         
         # ═══ Chat Completion ═══
 
-        # ═══ 重置包月额度（吸血鬼引擎内部调用）═══
+        # ═══ 月度额度重置 ═══
         if path == "/v1/admin/reset-plan":
             auth = validate_api_key(self.headers.get("Authorization", ""))
             if not auth:
