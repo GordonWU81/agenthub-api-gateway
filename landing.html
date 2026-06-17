@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hermes API — OpenAI 兼容的 AI 模型接口</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.6; }
+
+.hero { text-align: center; padding: 80px 20px 60px; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }
+.hero h1 { font-size: 48px; font-weight: 700; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.hero p { color: #94a3b8; font-size: 18px; margin: 20px 0; max-width: 600px; margin: 20px auto; }
+.hero .badge { display: inline-block; background: #1e293b; border: 1px solid #334155; border-radius: 20px; padding: 6px 16px; font-size: 14px; color: #38bdf8; }
+
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; max-width: 1100px; margin: 40px auto; padding: 0 20px; }
+.feature { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 30px; }
+.feature h3 { color: #38bdf8; margin-bottom: 12px; font-size: 18px; }
+.feature p { color: #94a3b8; font-size: 14px; }
+
+.pricing { max-width: 900px; margin: 60px auto; padding: 0 20px; }
+.pricing h2 { text-align: center; font-size: 32px; margin-bottom: 40px; }
+.price-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 24px; }
+.price-card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 30px; text-align: center; }
+.price-card.featured { border-color: #38bdf8; position: relative; }
+.price-card .price { font-size: 36px; font-weight: 700; color: #f1f5f9; margin: 20px 0; }
+.price-card .price span { font-size: 14px; color: #64748b; }
+.price-card ul { list-style: none; text-align: left; margin: 20px 0; }
+.price-card ul li { padding: 6px 0; color: #94a3b8; font-size: 14px; }
+.price-card ul li:before { content: "✓ "; color: #22c55e; }
+.price-card .btn { display: inline-block; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-size: 16px; margin-top: 20px; }
+.price-card .btn.primary { background: #38bdf8; color: #0f172a; }
+.price-card .btn.secondary { background: #334155; color: #e2e8f0; }
+
+.code-example { max-width: 800px; margin: 40px auto; padding: 0 20px; }
+.code-example h2 { text-align: center; font-size: 24px; margin-bottom: 20px; }
+pre { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; overflow-x: auto; font-size: 14px; color: #a5b4fc; }
+code { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+footer { text-align: center; padding: 40px; color: #475569; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="badge">🚀 已上线 72+ 模型</div>
+  <h1>Hermes API</h1>
+  <p>OpenAI 兼容的 AI 模型接口 — 即插即用，按量计费，支付宝自助充值</p>
+  <p>只需改一行代码：<code style="background:#1e293b;padding:2px 8px;border-radius:4px;color:#38bdf8">base_url="http://47.97.68.146/v1"</code></p>
+</div>
+
+<div class="features">
+  <div class="feature">
+    <h3>⚡ 即开即用</h3>
+    <p>完全兼容 OpenAI SDK，改一行 base_url 即可接入。支持 72+ 主流模型</p>
+  </div>
+  <div class="feature">
+    <h3>🔑 安全可控</h3>
+    <p>API Key 认证 + Token 计费。支持创建子用户、分配额度、用量追踪</p>
+  </div>
+  <div class="feature">
+    <h3>💳 自助充值</h3>
+    <p>支付宝扫码支付，1元=10万 tokens，自动到账，无需人工干预</p>
+  </div>
+  <div class="feature">
+    <h3>🧠 智能路由</h3>
+    <p>自动故障切换 + 熔断保护。一个模型挂了自动切到备用模型</p>
+  </div>
+  <div class="feature">
+    <h3>📊 用量可视化</h3>
+    <p>完整的使用记录查询，随时查看消费明细和余额变动</p>
+  </div>
+  <div class="feature">
+    <h3>🌐 国内优化</h3>
+    <p>服务器部署在国内，低延迟。支持 DeepSeek、SiliconFlow 等国内模型</p>
+  </div>
+</div>
+
+<div class="pricing">
+  <h2>💰 定价</h2>
+  <div class="price-cards">
+    <div class="price-card">
+      <h3>免费额度</h3>
+      <div class="price">10万 <span>tokens</span></div>
+      <ul>
+        <li>注册即送 10万 tokens</li>
+        <li>所有模型可用</li>
+        <li>无时间限制</li>
+      </ul>
+      <a class="btn secondary" href="http://47.97.68.146/v1/payment/page">开始使用</a>
+    </div>
+    <div class="price-card featured">
+      <h3>🔥 标准</h3>
+      <div class="price">¥30 <span>/ 300万 tokens</span></div>
+      <ul>
+        <li>300万 tokens</li>
+        <li>所有模型可用</li>
+        <li>无限使用期限</li>
+      </ul>
+      <a class="btn primary" href="http://47.97.68.146/v1/payment/page">立即充值</a>
+    </div>
+    <div class="price-card">
+      <h3>专业</h3>
+      <div class="price">¥100 <span>/ 1000万 tokens</span></div>
+      <ul>
+        <li>1000万 tokens</li>
+        <li>所有模型可用</li>
+        <li>无限使用期限</li>
+      </ul>
+      <a class="btn secondary" href="http://47.97.68.146/v1/payment/page">立即充值</a>
+    </div>
+  </div>
+</div>
+
+<div class="code-example">
+  <h2>📝 使用示例</h2>
+  <pre># Python
+import openai
+client = openai.OpenAI(
+    base_url="http://47.97.68.146/v1",
+    api_key="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+)
+response = client.chat.completions.create(
+    model="deepseek-v4-flash",
+    messages=[{"role": "user", "content": "你好！"}]
+)
+print(response.choices[0].message.content)
+
+# cURL
+curl http://47.97.68.146/v1/chat/completions \
+  -H "Authorization: Bearer sk-xxxxxxxx" \
+  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'</pre>
+</div>
+
+<div class="code-example">
+  <h2>📋 管理 API</h2>
+  <pre># 获取模型列表
+curl http://47.97.68.146/v1/models
+
+# 查询余额
+curl http://47.97.68.146/v1/admin/users \
+  -H "Authorization: Bearer sk-admin-xxxxxxxx"
+
+# 充值页面（浏览器打开）
+http://47.97.68.146/v1/payment/page</pre>
+</div>
+
+<footer>
+  <p>Hermes API Gateway · 一人企业出品 · MIT License</p>
+  <p style="margin-top:8px">由 面包多Pay 提供支付支持</p>
+</footer>
+</body>
+</html>
