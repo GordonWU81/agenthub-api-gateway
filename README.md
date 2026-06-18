@@ -7,7 +7,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/GordonWU81/agenthub-api-gateway?style=flat-square)](https://github.com/GordonWU81/agenthub-api-gateway/stargazers)
 [![License](https://img.shields.io/github/license/GordonWU81/agenthub-api-gateway?style=flat-square)](LICENSE)
 [![Status](https://img.shields.io/badge/status-production%20ready-green?style=flat-square)]()
-[![Models](https://img.shields.io/badge/models-72-blue?style=flat-square)]()
+[![Models](https://img.shields.io/badge/models-100+-blue?style=flat-square)]()
 
 [English](README.md) | [中文](#)
 
@@ -18,7 +18,7 @@
 ## 📋 Overview
 
 AgentHub API Gateway is a production-ready API gateway for LLMs that combines:
-- **Model Router** — 72+ models from 5 providers with automatic failover
+- **Model Router** — 100++ models from 5 providers with automatic failover
 - **API Key Authentication** — user management, token-based billing
 - **Self-hosted Payment** — Alipay, WeChat Pay, and USDT/TRC20 crypto
 - **Self-registration** — users sign up and get API keys automatically
@@ -28,7 +28,7 @@ Designed for independent developers and small teams who want to offer AI API ser
 ## ✨ Features
 
 ### 🧠 Smart Model Routing
-- 72+ models from DeepSeek, SiliconFlow, and other providers
+- 100++ models from DeepSeek, SiliconFlow, and other providers
 - Automatic failover when a provider is unavailable
 - Circuit breaker pattern prevents cascading failures
 - Routes to the cheapest available model first
@@ -101,13 +101,13 @@ User → Nginx (:80)
 
 | Component | Port | Description |
 |-----------|:----:|-------------|
-| Model Router | 9099 | Routes requests to 72+ models, handles failover |
+| Model Router | 9099 | Routes requests to 100++ models, handles failover |
 | API Gateway | 9199 | API key auth, token billing, user management |
 | Payment Platform | 9188 | Order creation, payment pages, webhook callbacks |
 
 ## 🔧 Available Models
 
-72+ models from 5 providers including:
+100++ models from 5 providers including:
 - DeepSeek (V2, V3, chat, coder)
 - SiliconFlow (various models)
 - And more...
